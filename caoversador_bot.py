@@ -177,7 +177,7 @@ def cancel(update: Update, context: CallbackContext) -> int:
 
 # Configuração principal do bot
 def main():
-    TOKEN = "7710466234:AAF0pgfBMT7eAweguOIO3xGkg7j9mVqZHto"
+    TOKEN = "TOKEN"
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
 
