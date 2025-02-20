@@ -1,4 +1,5 @@
 import qrcode
+import sqlite3
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
 
@@ -11,6 +12,58 @@ def gerar_qrcode(link):
     qr_path = "/tmp/perfil_qrcode.png"  # Caminho temporário para salvar a imagem
     qr.save(qr_path)
     return qr_path
+
+# Função para conectar ao banco de dados
+def conectar_db():
+    conn = sqlite3.connect('castramovel.db')
+    cursor = conn.cursor()
+    return conn, cursor
+
+# Função para criar as tabelas no banco de dados
+def criar_tabelas():
+    conn, cursor = conectar_db()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY,
+            name TEXT,
+            cpf TEXT,
+            address TEXT,
+            phone TEXT
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS animais (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER,
+            name TEXT,
+            species TEXT,
+            breed TEXT,
+            age INTEGER,
+            FOREIGN KEY(user_id) REFERENCES usuarios(id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# Função para cadastrar usuário no banco de dados
+def cadastrar_usuario(name, cpf, address, phone):
+    conn, cursor = conectar_db()
+    cursor.execute('''
+        INSERT INTO usuarios (name, cpf, address, phone)
+        VALUES (?, ?, ?, ?)
+    ''', (name, cpf, address, phone))
+    conn.commit()
+    conn.close()
+
+# Função para buscar usuário no banco de dados
+def buscar_usuario(cpf):
+    conn, cursor = conectar_db()
+    cursor.execute('''
+        SELECT * FROM usuarios WHERE cpf = ?
+    ''', (cpf,))
+    user = cursor.fetchone()
+    conn.close()
+    return user
 
 # Função para iniciar o bot
 def start(update: Update, context: CallbackContext) -> int:
@@ -34,14 +87,14 @@ def handle_menu(update: Update, context: CallbackContext) -> int:
         update.message.reply_text("Ótimo! Vamos começar o cadastro. Por favor, informe o seu nome completo.")
         return NAME
     elif text == "Minhas informações":
-        user_data = context.user_data.get(user_id)
+        user_data = buscar_usuario(update.message.text)  # Buscar informações no banco de dados
         if user_data:
             update.message.reply_text(
-                "Aqui estão as suas informações cadastradas:\n\n"
-                f"Nome: {user_data['name']}\n"
-                f"CPF: {user_data['cpf']}\n"
-                f"Endereço: {user_data['address']}\n"
-                f"Telefone: {user_data['phone']}\n"
+                f"Aqui estão as suas informações cadastradas:\n\n"
+                f"Nome: {user_data[1]}\n"
+                f"CPF: {user_data[2]}\n"
+                f"Endereço: {user_data[3]}\n"
+                f"Telefone: {user_data[4]}\n"
             )
         else:
             update.message.reply_text(
@@ -58,7 +111,7 @@ def handle_menu(update: Update, context: CallbackContext) -> int:
         update.message.reply_text("Por favor, descreva sua dúvida para que um veterinário possa ajudá-lo.")
         return ConversationHandler.END
     elif text == "QR Code":
-        user_data = context.user_data.get(user_id)
+        user_data = buscar_usuario(update.message.text)  # Buscar informações no banco de dados
         if user_data:
             # Gerar o link do perfil e QR Code
             link_do_perfil = f"https://www.meusite.com.br/perfil/{user_id}"
@@ -128,8 +181,13 @@ def confirm_data(update: Update, context: CallbackContext) -> int:
     text = update.message.text.lower()
     user_id = update.message.chat.id
     if text == "sim":
-        # Salvar os dados no contexto
-        context.user_data[user_id] = context.user_data.copy()
+        # Salvar os dados no banco de dados
+        cadastrar_usuario(
+            context.user_data['name'], 
+            context.user_data['cpf'], 
+            context.user_data['address'], 
+            context.user_data['phone']
+        )
         
         # Gerar o link do perfil
         link_do_perfil = f"https://www.meusite.com.br/perfil/{user_id}"
@@ -180,6 +238,8 @@ def main():
     TOKEN = "TOKEN"
     updater = Updater(TOKEN)
     dispatcher = updater.dispatcher
+
+    criar_tabelas()  # Chama a função para criar as tabelas no banco de dados
 
     # Configuração do fluxo de conversa
     conv_handler = ConversationHandler(
