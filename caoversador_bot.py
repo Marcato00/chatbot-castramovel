@@ -1,267 +1,172 @@
-import qrcode
-import sqlite3
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
+import requests
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, CallbackContext
 
-# Estados da conversa
-MENU, NAME, CPF, ADDRESS, PHONE, CONFIRM, FINAL_OPTIONS = range(7)
+TOKEN = "7710466234:AAF0pgfBMT7eAweguOIO3xGkg7j9mVqZHto"
 
-# Função para gerar QR Code
-def gerar_qrcode(link):
-    qr = qrcode.make(link)
-    qr_path = "/tmp/perfil_qrcode.png"  # Caminho temporário para salvar a imagem
-    qr.save(qr_path)
-    return qr_path
+# Estados do cadastro
+NOME, CPF, CEP, CONFIRMAR_ENDERECO, TELEFONE, NOME_ANIMAL, ESPECIE = range(7)
 
-# Função para conectar ao banco de dados
-def conectar_db():
-    conn = sqlite3.connect('castramovel.db')
-    cursor = conn.cursor()
-    return conn, cursor
+cadastros = {}
 
-# Função para criar as tabelas no banco de dados
-def criar_tabelas():
-    conn, cursor = conectar_db()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY,
-            name TEXT,
-            cpf TEXT,
-            address TEXT,
-            phone TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS animais (
-            id INTEGER PRIMARY KEY,
-            user_id INTEGER,
-            name TEXT,
-            species TEXT,
-            breed TEXT,
-            age INTEGER,
-            FOREIGN KEY(user_id) REFERENCES usuarios(id)
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-# Função para cadastrar usuário no banco de dados
-def cadastrar_usuario(name, cpf, address, phone):
-    conn, cursor = conectar_db()
-    cursor.execute('''
-        INSERT INTO usuarios (name, cpf, address, phone)
-        VALUES (?, ?, ?, ?)
-    ''', (name, cpf, address, phone))
-    conn.commit()
-    conn.close()
-
-# Função para buscar usuário no banco de dados
-def buscar_usuario(cpf):
-    conn, cursor = conectar_db()
-    cursor.execute('''
-        SELECT * FROM usuarios WHERE cpf = ?
-    ''', (cpf,))
-    user = cursor.fetchone()
-    conn.close()
-    return user
-
-# Função para iniciar o bot
-def start(update: Update, context: CallbackContext) -> int:
-    reply_keyboard = [
-        ["Quero cadastrar meu animal!", "Minhas informações"],
-        ["Conversar com um veterinário", "QR Code"]
+async def start(update: Update, context: CallbackContext):
+    """Mostra o menu inicial."""
+    keyboard = [
+        [InlineKeyboardButton("🐶 Cadastrar meu animal", callback_data="cadastrar_animal")],
+        [InlineKeyboardButton("💬 Falar com um veterinário", callback_data="falar_veterinario")],
+        [InlineKeyboardButton("📋 Minhas informações", callback_data="minhas_info")],
+        [InlineKeyboardButton("❓ Dúvidas", callback_data="duvidas")]
     ]
-    update.message.reply_text(
-        "Olá! Sou o CãoVersador, a IA do CastraMóvel! 🐾\n\n"
-        "Como posso lhe ajudar?",
-        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
-    )
-    return MENU
-
-# Lidar com as opções do menu
-def handle_menu(update: Update, context: CallbackContext) -> int:
-    text = update.message.text
-    user_id = update.message.chat.id
     
-    if text == "Quero cadastrar meu animal!":
-        update.message.reply_text("Ótimo! Vamos começar o cadastro. Por favor, informe o seu nome completo.")
-        return NAME
-    elif text == "Minhas informações":
-        user_data = buscar_usuario(update.message.text)  # Buscar informações no banco de dados
-        if user_data:
-            update.message.reply_text(
-                f"Aqui estão as suas informações cadastradas:\n\n"
-                f"Nome: {user_data[1]}\n"
-                f"CPF: {user_data[2]}\n"
-                f"Endereço: {user_data[3]}\n"
-                f"Telefone: {user_data[4]}\n"
-            )
-        else:
-            update.message.reply_text(
-                "Você ainda não possui um cadastro. Deseja começar agora?\n\n"
-                "Selecione uma opção:",
-                reply_markup=ReplyKeyboardMarkup(
-                    [["Quero cadastrar meu animal!", "Voltar ao menu"]], 
-                    one_time_keyboard=True, 
-                    resize_keyboard=True
-                )
-            )
-        return MENU
-    elif text == "Conversar com um veterinário":
-        update.message.reply_text("Por favor, descreva sua dúvida para que um veterinário possa ajudá-lo.")
-        return ConversationHandler.END
-    elif text == "QR Code":
-        user_data = buscar_usuario(update.message.text)  # Buscar informações no banco de dados
-        if user_data:
-            # Gerar o link do perfil e QR Code
-            link_do_perfil = f"https://www.meusite.com.br/perfil/{user_id}"
-            qr_path = gerar_qrcode(link_do_perfil)
-            
-            # Enviar QR Code para o usuário
-            update.message.reply_text("Aqui está o seu QR Code para acessar seu perfil:")
-            update.message.reply_photo(photo=open(qr_path, 'rb'))
-        else:
-            # Informar que não há cadastro e voltar ao menu
-            update.message.reply_text(
-                "Você ainda não possui um cadastro. Por favor, escolha uma das opções abaixo para continuar:",
-                reply_markup=ReplyKeyboardMarkup(
-                    [["Quero cadastrar meu animal!", "Voltar ao menu"]], 
-                    one_time_keyboard=True, 
-                    resize_keyboard=True
-                )
-            )
-        return MENU
-    else:
-        update.message.reply_text("Desculpe, não entendi. Por favor, selecione uma das opções.")
-        return MENU
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Escolha uma opção abaixo:", reply_markup=reply_markup)
 
-# Coletar o nome completo
-def get_name(update: Update, context: CallbackContext) -> int:
-    context.user_data['name'] = update.message.text
-    update.message.reply_text(f"Obrigado, {context.user_data['name']}! Agora, por favor, informe o seu CPF.")
+async def button_click(update: Update, context: CallbackContext):
+    """Inicia o cadastro ou responde a outras opções do menu."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "cadastrar_animal":
+        await query.message.reply_text("Vamos começar o cadastro. Qual é o seu nome completo?")
+        return NOME
+    else:
+        responses = {
+            "falar_veterinario": "Em breve, um veterinário entrará em contato com você.",
+            "minhas_info": "Suas informações ainda não estão cadastradas. Use a opção 'Cadastrar meu animal'.",
+            "duvidas": "Se tiver dúvidas, entre em contato pelo e-mail suporte@meuvet.com."
+        }
+        await query.message.reply_text(responses.get(query.data, "Opção inválida!"))
+        return ConversationHandler.END
+
+async def get_nome(update: Update, context: CallbackContext):
+    """Recebe o nome do dono."""
+    context.user_data["nome"] = update.message.text
+    await update.message.reply_text("Ótimo! Agora informe seu CPF:")
     return CPF
 
-# Coletar o CPF (verificação de números)
-def get_cpf(update: Update, context: CallbackContext) -> int:
-    cpf = update.message.text
-    if cpf.isdigit() and len(cpf) == 11:  # Verifica se o CPF é composto apenas por números e tem 11 dígitos
-        context.user_data['cpf'] = cpf
-        update.message.reply_text("Obrigado! Agora informe o seu endereço completo.")
-        return ADDRESS
-    else:
-        update.message.reply_text("Por favor, informe um CPF válido (somente números e 11 dígitos). Tente novamente.")
-        return CPF
+async def get_cpf(update: Update, context: CallbackContext):
+    """Recebe o CPF do dono."""
+    context.user_data["cpf"] = update.message.text
+    await update.message.reply_text("Agora informe seu CEP:")
+    return CEP
 
-# Coletar o endereço
-def get_address(update: Update, context: CallbackContext) -> int:
-    context.user_data['address'] = update.message.text
-    update.message.reply_text("Ótimo! Agora, por favor, informe o seu telefone para contato.")
-    return PHONE
+async def get_cep(update: Update, context: CallbackContext):
+    """Recebe o CEP, consulta o endereço e pede confirmação."""
+    cep = update.message.text
+    context.user_data["cep"] = cep
 
-# Coletar o telefone (verificação de números)
-def get_phone(update: Update, context: CallbackContext) -> int:
-    phone = update.message.text
-    if phone.isdigit() and len(phone) >= 10:  # Verifica se o telefone é composto apenas por números e tem pelo menos 10 dígitos
-        context.user_data['phone'] = phone
-        update.message.reply_text(
-            "Cadastro quase completo! Aqui estão os dados fornecidos:\n\n"
-            f"Nome: {context.user_data['name']}\n"
-            f"CPF: {context.user_data['cpf']}\n"
-            f"Endereço: {context.user_data['address']}\n"
-            f"Telefone: {context.user_data['phone']}\n\n"
-            "Está tudo correto? (Sim/Não)"
-        )
-        return CONFIRM
-    else:
-        update.message.reply_text("Por favor, informe um telefone válido (somente números e com pelo menos 10 dígitos). Tente novamente.")
-        return PHONE
+    # Consulta o endereço pelo ViaCEP
+    url = f"https://viacep.com.br/ws/{cep}/json/"
+    response = requests.get(url).json()
 
-# Confirmar ou reiniciar o cadastro
-def confirm_data(update: Update, context: CallbackContext) -> int:
-    text = update.message.text.lower()
-    user_id = update.message.chat.id
-    if text == "sim":
-        # Salvar os dados no banco de dados
-        cadastrar_usuario(
-            context.user_data['name'], 
-            context.user_data['cpf'], 
-            context.user_data['address'], 
-            context.user_data['phone']
-        )
-        
-        # Gerar o link do perfil
-        link_do_perfil = f"https://www.meusite.com.br/perfil/{user_id}"
-        
-        # Gerar QR Code com o link do perfil
-        qr_path = gerar_qrcode(link_do_perfil)
-        
-        # Enviar o QR Code para o usuário
-        update.message.reply_text(
-            "Cadastro finalizado com sucesso! Aqui está o seu QR Code para acessar seu perfil no aplicativo:"
-        )
-        update.message.reply_photo(photo=open(qr_path, 'rb'))
-        
-        # Perguntar se o usuário deseja fazer mais alguma coisa
-        reply_keyboard = [["Voltar ao menu", "Finalizar conversa"]]
-        update.message.reply_text(
-            "Posso ajudar com algo mais?",
-            reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
-        )
-        return FINAL_OPTIONS
-    elif text == "não":
-        update.message.reply_text("Vamos reiniciar o cadastro. Por favor, informe o seu nome completo.")
-        return NAME
-    else:
-        update.message.reply_text("Por favor, responda apenas com 'Sim' ou 'Não'.")
-        return CONFIRM
+    if "erro" in response:
+        await update.message.reply_text("CEP inválido! Tente novamente.")
+        return CEP
 
-# Função de opções finais (voltar ao menu ou finalizar conversa)
-def final_options(update: Update, context: CallbackContext) -> int:
-    text = update.message.text
-    if text == "Voltar ao menu":
-        return start(update, context)  # Reinicia a conversa a partir do menu
-    elif text == "Finalizar conversa":
-        return cancel(update, context)  # Finaliza a conversa
-    else:
-        update.message.reply_text(
-            "Opção inválida. Por favor, escolha entre 'Voltar ao menu' ou 'Finalizar conversa'."
-        )
-        return FINAL_OPTIONS
+    endereco = f"{response['logradouro']}, {response['bairro']}, {response['localidade']} - {response['uf']}"
+    context.user_data["endereco"] = endereco
 
-# Cancelar o cadastro
-def cancel(update: Update, context: CallbackContext) -> int:
-    update.message.reply_text("Conversa encerrada. Até mais!")
-    return ConversationHandler.END
+    keyboard = [
+        [InlineKeyboardButton("✅ Sim", callback_data="confirmar_endereco")],
+        [InlineKeyboardButton("❌ Não", callback_data="recusar_endereco")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-# Configuração principal do bot
-def main():
-    TOKEN = "TOKEN"
-    updater = Updater(TOKEN)
-    dispatcher = updater.dispatcher
+    await update.message.reply_text(f"Confirme seu endereço: {endereco}", reply_markup=reply_markup)
+    return CONFIRMAR_ENDERECO
 
-    criar_tabelas()  # Chama a função para criar as tabelas no banco de dados
+async def confirmar_endereco(update: Update, context: CallbackContext):
+    """Confirma o endereço e pede o telefone."""
+    query = update.callback_query
+    await query.answer()
 
-    # Configuração do fluxo de conversa
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            MENU: [MessageHandler(Filters.text & ~Filters.command, handle_menu)],
-            NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
-            CPF: [MessageHandler(Filters.text & ~Filters.command, get_cpf)],
-            ADDRESS: [MessageHandler(Filters.text & ~Filters.command, get_address)],
-            PHONE: [MessageHandler(Filters.text & ~Filters.command, get_phone)],
-            CONFIRM: [MessageHandler(Filters.text & ~Filters.command, confirm_data)],
-            FINAL_OPTIONS: [MessageHandler(Filters.text & ~Filters.command, final_options)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)],
+    # Solicita o telefone
+    keyboard = [[KeyboardButton("📱 Enviar meu telefone", request_contact=True)]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    await query.message.reply_text("Por favor, compartilhe seu telefone tocando no botão abaixo:", reply_markup=reply_markup)
+
+    return TELEFONE
+
+async def recusar_endereco(update: Update, context: CallbackContext):
+    """Caso o endereço não esteja correto, pede para o usuário inserir um novo CEP."""
+    query = update.callback_query
+    await query.answer()
+
+    await query.message.reply_text("Por favor, insira o CEP correto:")
+    return CEP
+
+async def get_telefone(update: Update, context: CallbackContext):
+    """Recebe o telefone do usuário."""
+    contato = update.message.contact
+    context.user_data["telefone"] = contato.phone_number
+
+    await update.message.reply_text("Agora, informe o nome do seu animal:")
+    return NOME_ANIMAL
+
+async def get_nome_animal(update: Update, context: CallbackContext):
+    """Recebe o nome do animal."""
+    context.user_data["nome_animal"] = update.message.text
+
+    # Pergunta se é canino ou felino
+    keyboard = [
+        [InlineKeyboardButton("🐶 Canino", callback_data="canino")],
+        [InlineKeyboardButton("🐱 Felino", callback_data="felino")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text("Seu pet é um Canino ou Felino?", reply_markup=reply_markup)
+    return ESPECIE
+
+async def get_especie(update: Update, context: CallbackContext):
+    """Recebe se o pet é Canino ou Felino."""
+    query = update.callback_query
+    await query.answer()
+
+    context.user_data["especie"] = "Canino" if query.data == "canino" else "Felino"
+
+    user_id = query.from_user.id
+    cadastros[user_id] = context.user_data.copy()
+
+    await query.message.reply_text(
+        f"✅ Cadastro concluído!\n\n"
+        f"👤 **Dono:** {context.user_data['nome']}\n"
+        f"📍 **Endereço:** {context.user_data['endereco']}\n"
+        f"📞 **Telefone:** {context.user_data['telefone']}\n"
+        f"🐾 **Pet:** {context.user_data['nome_animal']} ({context.user_data['especie']})\n"
     )
 
-    dispatcher.add_handler(conv_handler)
+    return ConversationHandler.END
 
-    # Inicia o bot
-    print("Bot está rodando... Pressione Ctrl+C para sair.")
-    updater.start_polling()
-    updater.idle()
+async def cancel(update: Update, context: CallbackContext):
+    """Cancela o cadastro."""
+    await update.message.reply_text("Cadastro cancelado.")
+    return ConversationHandler.END
 
-if __name__ == '__main__':
+def main():
+    app = Application.builder().token(TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(button_click, pattern="^cadastrar_animal$")],
+        states={
+            NOME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_nome)],
+            CPF: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_cpf)],
+            CEP: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_cep)],
+            CONFIRMAR_ENDERECO: [
+                CallbackQueryHandler(confirmar_endereco, pattern="^confirmar_endereco$"),
+                CallbackQueryHandler(recusar_endereco, pattern="^recusar_endereco$")
+            ],
+            TELEFONE: [MessageHandler(filters.CONTACT, get_telefone)],
+            NOME_ANIMAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_nome_animal)],
+            ESPECIE: [CallbackQueryHandler(get_especie, pattern="^(canino|felino)$")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(conv_handler)
+
+    print("Bot rodando...")
+    app.run_polling()
+
+if __name__ == "__main__":
     main()
